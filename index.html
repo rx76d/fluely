@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fluely - AI Meeting Assistant</title>
+</head>
+
+<body style="background-color: transparent; margin: 0; padding: 0; overflow: hidden;">
+  <div id="root"></div>
+
+  <svg xmlns="http://www.w3.org/2000/svg" style="position: absolute; width: 0; height: 0; visibility: hidden;"
+    aria-hidden="true">
+    <filter id="refraction" filterUnits="objectBoundingBox">
+      <feTurbulence type="turbulence" baseFrequency="0.003" numOctaves="1" result="noise" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="12" xChannelSelector="R" yChannelSelector="G" />
+
+      <feSpecularLighting in="noise" surfaceScale="5" specularConstant="0.75" specularExponent="20"
+        lighting-color="#ffffff" result="specOut">
+        <fePointLight x="-5000" y="-10000" z="20000" />
+      </feSpecularLighting>
+      <feComposite in="specOut" in2="SourceGraphic" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" />
+    </filter>
+  </svg>
+
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
