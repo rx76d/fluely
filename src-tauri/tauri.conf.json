@@ -1,0 +1,27 @@
+{
+  "productName": "fluely",
+  "version": "0.1.0",
+  "identifier": "com.fluely.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Fluely",
+        "width": 1024,
+        "height": 576,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
