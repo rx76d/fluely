@@ -13,7 +13,9 @@ export function Settings() {
   } = useStore();
   const [apiKey, setApiKey] = useState('');
   const [apiKeyName, setApiKeyName] = useState('');
-  const [savedKeys, setSavedKeys] = useState<{ id: string, name: string, provider: string }[]>([]);
+  const [baseUrl, setBaseUrl] = useState('');
+  const [customModelName, setCustomModelName] = useState('');
+  const [savedKeys, setSavedKeys] = useState<{ id: string, name: string, provider: string, baseUrl?: string }[]>([]);
   const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
   const [newKeyProvider, setNewKeyProvider] = useState(provider);
   const [saved, setSaved] = useState(false);
@@ -51,6 +53,17 @@ export function Settings() {
         { id: 'gpt-5-nano', label: 'GPT-5 nano', description: 'Fastest, most cost-efficient version of GPT-5.' },
         { id: 'gpt-5', label: 'GPT-5', description: 'Previous intelligent reasoning model for coding.' },
         { id: 'gpt-4.1', label: 'GPT-4.1', description: 'Smartest non-reasoning model.' }
+      ]
+    },
+    {
+      name: 'OpenAI Compatible',
+      description: 'Connect to OpenRouter, Groq, Together, vLLM, Ollama, LM Studio, or custom endpoint',
+      models: [
+        { id: 'custom-model', label: 'Custom Model Name', description: 'Type any custom model identifier' },
+        { id: 'gpt-4o', label: 'gpt-4o', description: 'OpenAI GPT-4o' },
+        { id: 'deepseek-r1', label: 'deepseek-r1', description: 'DeepSeek R1 Reasoning' },
+        { id: 'llama-3.3-70b-instruct', label: 'llama-3.3-70b', description: 'Llama 3.3 70B' },
+        { id: 'mistral-large-latest', label: 'mistral-large', description: 'Mistral Large' }
       ]
     },
     {
@@ -146,7 +159,7 @@ export function Settings() {
   const currentProviderData = providers.find(p => p.name === provider) || providers[0];
 
   useEffect(() => {
-    if (!currentProviderData.models.some(m => m.id === model)) {
+    if (!currentProviderData.models.some(m => m.id === model) && model !== customModelName) {
       setModel(currentProviderData.models[0].id);
     }
 
@@ -184,11 +197,13 @@ export function Settings() {
       await invoke('db_save_api_key', {
         name: apiKeyName,
         provider: newKeyProvider,
-        keyValue: apiKey
+        keyValue: apiKey,
+        baseUrl: baseUrl.trim()
       });
 
       setApiKey('');
       setApiKeyName('');
+      setBaseUrl('');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
 
@@ -300,33 +315,60 @@ export function Settings() {
           </div>
         </section>
 
-        {!provider.toLowerCase().includes('local') && (
-          <section className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Layers size={18} className="text-blue-500" />
-              <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 dark:text-zinc-500">Model Configuration</h3>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {currentProviderData.models.map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => setModel(m.id)}
-                  className={`flex flex-col p-4 rounded-2xl border-2 transition-all text-left group ${model === m.id
-                      ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 text-blue-600 shadow-sm'
-                      : 'border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 text-gray-400 hover:border-gray-200 hover:bg-gray-100 dark:hover:bg-white/10'
-                    }`}
-                >
-                  <span className={`text-[12px] font-bold ${model === m.id ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-zinc-300'}`}>
-                    {m.label}
-                  </span>
-                  <span className="text-[10px] opacity-60 mt-1 line-clamp-1 group-hover:line-clamp-none">
-                    {m.description}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Layers size={18} className="text-blue-500" />
+            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 dark:text-zinc-500">Model Configuration</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {currentProviderData.models.map(m => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setModel(m.id);
+                  setCustomModelName('');
+                }}
+                className={`flex flex-col p-4 rounded-2xl border-2 transition-all text-left group ${model === m.id && !customModelName
+                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 text-blue-600 shadow-sm'
+                    : 'border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 text-gray-400 hover:border-gray-200 hover:bg-gray-100 dark:hover:bg-white/10'
+                  }`}
+              >
+                <span className={`text-[12px] font-bold ${model === m.id && !customModelName ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-zinc-300'}`}>
+                  {m.label}
+                </span>
+                <span className="text-[10px] opacity-60 mt-1 line-clamp-1 group-hover:line-clamp-none">
+                  {m.description}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="pt-2">
+            <label className="block text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">
+              Custom / Manual Model Name (Optional Override for any Provider)
+            </label>
+            <input
+              type="text"
+              value={customModelName}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomModelName(val);
+                if (val.trim()) {
+                  setModel(val.trim());
+                } else if (currentProviderData.models.length > 0) {
+                  setModel(currentProviderData.models[0].id);
+                }
+              }}
+              placeholder={`Or type any custom model name for ${provider} (e.g. ${provider === 'Gemini' ? 'gemini-3.5-pro' : provider === 'OpenAI' ? 'gpt-5-turbo' : provider === 'Anthropic' ? 'claude-3-7-sonnet' : 'custom-model-id'})...`}
+              className="w-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white text-xs font-mono focus:outline-none focus:border-blue-500/50 transition-all"
+            />
+            {customModelName && (
+              <p className="text-[10px] text-blue-500 font-medium mt-1">
+                Active custom model override: <code className="font-bold">{model}</code>
+              </p>
+            )}
+          </div>
+        </section>
 
         <section className="space-y-4">
           <div className="flex items-center gap-2 mb-2">
@@ -372,6 +414,19 @@ export function Settings() {
                   </select>
                 </div>
               </div>
+
+              {newKeyProvider === 'OpenAI Compatible' && (
+                <div>
+                  <input
+                    type="text"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="Base URL (e.g. https://openrouter.ai/api/v1 or https://api.groq.com/openai/v1)"
+                    className="w-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white text-xs font-mono focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                </div>
+              )}
+
               <div className="relative">
                 <input
                   type="password"
@@ -437,6 +492,9 @@ export function Settings() {
                               {k.provider}
                             </span>
                           </div>
+                          {k.baseUrl ? (
+                            <span className="text-[9px] text-blue-400 font-mono mt-0.5 truncate max-w-[240px]">{k.baseUrl}</span>
+                          ) : null}
                           <span className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">••••••••••••••••</span>
                         </div>
                       )}

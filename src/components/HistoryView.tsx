@@ -11,6 +11,13 @@ interface Session {
   action_items: string;
 }
 
+function safeDate(dStr: string): Date {
+  if (!dStr) return new Date();
+  const isoStr = dStr.includes(' ') && !dStr.includes('T') ? dStr.replace(' ', 'T') : dStr;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
 export function HistoryView() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,7 +27,7 @@ export function HistoryView() {
     async function loadSessions() {
       try {
         const data = await invoke<Session[]>('get_sessions');
-        setSessions(data);
+        setSessions(data || []);
       } catch (err) {
         console.error("Failed to load sessions:", err);
       } finally {
@@ -80,7 +87,7 @@ export function HistoryView() {
               </div>
               <div>
                 <h4 className="text-sm font-semibold text-white/90 group-hover:text-white transition-colors">{session.title}</h4>
-                <p className="text-xs text-white/50">{new Date(session.date).toLocaleString()}</p>
+                <p className="text-xs text-white/50">{safeDate(session.date).toLocaleString()}</p>
               </div>
             </div>
 
@@ -108,7 +115,7 @@ export function HistoryView() {
             <header className="mb-10">
               <div className="flex items-center gap-3 text-blue-400 mb-2">
                 <Clock size={16} />
-                <span className="text-xs font-semibold uppercase tracking-widest">{new Date(selectedSession.date).toLocaleString()}</span>
+                <span className="text-xs font-semibold uppercase tracking-widest">{safeDate(selectedSession.date).toLocaleString()}</span>
               </div>
               <h1 className="text-3xl font-bold text-white mb-4">{selectedSession.title}</h1>
               <div className="h-1 w-20 bg-blue-500 rounded-full"></div>

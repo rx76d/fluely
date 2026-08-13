@@ -64,6 +64,9 @@ interface AppState {
   settingsVersion: number;
   incrementSettingsVersion: () => void;
 
+  activeSessionId: number | null;
+  setActiveSessionId: (id: number | null) => void;
+
   userProfile: UserProfile;
   setUserProfile: (profile: UserProfile) => void;
 
@@ -73,6 +76,9 @@ interface AppState {
 export const useStore = create<AppState>()((set) => ({
   appState: 'HOME',
   setAppState: (state) => set({ appState: state }),
+
+  activeSessionId: null,
+  setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
 
   theme: 'system',
   setTheme: (theme) => set({ theme }),
@@ -89,10 +95,7 @@ export const useStore = create<AppState>()((set) => ({
   liveTranscript: [],
   addTranscript: (item) => set((state) => ({ liveTranscript: [...state.liveTranscript, item] })),
   
-  aiResponses: [
-    "**Meeting Setup Detected.** Currently calibrating background noise constraints.",
-    "**System:** Establishing connection to AI model...",
-  ],
+  aiResponses: [],
   addAiResponse: (response) => set((state) => ({ aiResponses: [...state.aiResponses, response] })),
   updateAiResponse: (index, response) => set((state) => {
     const newResponses = [...state.aiResponses];
@@ -102,7 +105,7 @@ export const useStore = create<AppState>()((set) => ({
   setAiResponses: (responses) => set({ aiResponses: responses }),
   
   liveInsights: {
-    summary: "Meeting just started. Establishing context...",
+    summary: "",
     actionItems: [],
     suggestedAnswer: ""
   },
@@ -135,13 +138,11 @@ export const useStore = create<AppState>()((set) => ({
   setUserProfile: (userProfile) => set({ userProfile }),
 
   resetSession: () => set({
+    activeSessionId: null,
     liveTranscript: [],
-    aiResponses: [
-      "**Meeting Setup Detected.** Currently calibrating background noise constraints.",
-      "**System:** Establishing connection to AI model...",
-    ],
+    aiResponses: [],
     liveInsights: {
-      summary: "Meeting just started. Establishing context...",
+      summary: "",
       actionItems: [],
       suggestedAnswer: ""
     },

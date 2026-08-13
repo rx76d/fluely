@@ -24,7 +24,7 @@ struct Session {
 }
 
 #[tauri::command]
-async fn db_save_api_key(app: tauri::AppHandle, name: String, provider: String, key_value: String) -> Result<(), String> {
+async fn db_save_api_key(app: tauri::AppHandle, name: String, provider: String, key_value: String, base_url: Option<String>) -> Result<(), String> {
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_path = app_data.join("fluely.db");
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -35,9 +35,11 @@ async fn db_save_api_key(app: tauri::AppHandle, name: String, provider: String, 
         .as_millis()
         .to_string();
 
+    let b_url = base_url.unwrap_or_default();
+
     conn.execute(
-        "INSERT INTO api_keys (id, name, provider, key_value, is_active) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, name, provider, key_value, 0],
+        "INSERT INTO api_keys (id, name, provider, key_value, base_url, is_active) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, name, provider, key_value, b_url, 0],
     ).map_err(|e| e.to_string())?;
     
     Ok(())
@@ -49,13 +51,14 @@ async fn db_get_api_keys(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>
     let db_path = app_data.join("fluely.db");
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT id, name, provider, is_active FROM api_keys").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, name, provider, is_active, base_url FROM api_keys").map_err(|e| e.to_string())?;
     let keys = stmt.query_map([], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, String>(0)?,
             "name": row.get::<_, String>(1)?,
             "provider": row.get::<_, String>(2)?,
-            "isActive": row.get::<_, i32>(3)? == 1
+            "isActive": row.get::<_, i32>(3)? == 1,
+            "baseUrl": row.get::<_, Option<String>>(4)?.unwrap_or_default()
         }))
     }).map_err(|e| e.to_string())?;
     
@@ -88,16 +91,19 @@ async fn db_set_active_key(app: tauri::AppHandle, id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-async fn db_get_active_key(app: tauri::AppHandle) -> Result<Option<(String, String)>, String> {
+async fn db_get_active_key(app: tauri::AppHandle) -> Result<Option<(String, String, String)>, String> {
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_path = app_data.join("fluely.db");
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT key_value, provider FROM api_keys WHERE is_active = 1 LIMIT 1").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT key_value, provider, base_url FROM api_keys WHERE is_active = 1 LIMIT 1").map_err(|e| e.to_string())?;
     let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
     
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        Ok(Some((row.get::<_, String>(0).map_err(|e| e.to_string())?, row.get::<_, String>(1).map_err(|e| e.to_string())?)))
+        let key = row.get::<_, String>(0).map_err(|e| e.to_string())?;
+        let prov = row.get::<_, String>(1).map_err(|e| e.to_string())?;
+        let base_url = row.get::<_, Option<String>>(2).unwrap_or_default().unwrap_or_default();
+        Ok(Some((key, prov, base_url)))
     } else {
         Ok(None)
     }
@@ -141,7 +147,8 @@ async fn ask_llm(
     transcript_context: String,
     api_key: String,
     provider: String,
-    model: String
+    model: String,
+    base_url: Option<String>
 ) -> Result<String, String> {
     use serde_json::json;
     let http_client = reqwest::Client::new();
@@ -221,15 +228,39 @@ Audio → Speech-to-Text → Context AI → LLM → Live Suggestions.
         return Ok(json["content"][0]["text"].as_str().unwrap_or("No response from Anthropic").to_string());
     }
 
-    let url = match p_lower.as_str() {
-        "grok" => "https://api.x.ai/v1/chat/completions",
-        "mistral" => "https://api.mistral.ai/v1/chat/completions",
-        "deepseek" => "https://api.deepseek.com/chat/completions",
-        "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-        "kimi" => "https://api.moonshot.cn/v1/chat/completions",
-        "zai" => "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-        p if p.contains("local") => "http://localhost:8080/v1/chat/completions",
-        _ => "https://api.openai.com/v1/chat/completions",
+    let url = if let Some(ref bu) = base_url {
+        let trimmed = bu.trim();
+        if !trimmed.is_empty() {
+            if trimmed.ends_with("/chat/completions") {
+                trimmed.to_string()
+            } else if trimmed.ends_with('/') {
+                format!("{}chat/completions", trimmed)
+            } else {
+                format!("{}/chat/completions", trimmed)
+            }
+        } else {
+            match p_lower.as_str() {
+                "grok" => "https://api.x.ai/v1/chat/completions".to_string(),
+                "mistral" => "https://api.mistral.ai/v1/chat/completions".to_string(),
+                "deepseek" => "https://api.deepseek.com/chat/completions".to_string(),
+                "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".to_string(),
+                "kimi" => "https://api.moonshot.cn/v1/chat/completions".to_string(),
+                "zai" => "https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string(),
+                p if p.contains("local") => "http://localhost:8080/v1/chat/completions".to_string(),
+                _ => "https://api.openai.com/v1/chat/completions".to_string(),
+            }
+        }
+    } else {
+        match p_lower.as_str() {
+            "grok" => "https://api.x.ai/v1/chat/completions".to_string(),
+            "mistral" => "https://api.mistral.ai/v1/chat/completions".to_string(),
+            "deepseek" => "https://api.deepseek.com/chat/completions".to_string(),
+            "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".to_string(),
+            "kimi" => "https://api.moonshot.cn/v1/chat/completions".to_string(),
+            "zai" => "https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string(),
+            p if p.contains("local") => "http://localhost:8080/v1/chat/completions".to_string(),
+            _ => "https://api.openai.com/v1/chat/completions".to_string(),
+        }
     };
 
     let mut user_content = vec![json!({ "type": "text", "text": prompt })];
@@ -238,7 +269,7 @@ Audio → Speech-to-Text → Context AI → LLM → Live Suggestions.
     }
 
     let mut request = http_client.post(url);
-    if !p_lower.contains("local") {
+    if !p_lower.contains("local") && !api_key.is_empty() && api_key != "LOCAL_INFERENCE" {
         request = request.header("Authorization", format!("Bearer {}", api_key));
     }
 
@@ -269,6 +300,56 @@ fn get_audio_devices() -> Result<(String, String), String> {
 }
 
 #[tauri::command]
+fn create_session(app: tauri::AppHandle, title: String) -> Result<i32, String> {
+    use rusqlite::Connection;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&app_data).map_err(|e| e.to_string())?;
+    let db_path = app_data.join("fluely.db");
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            date TEXT NOT NULL,
+            transcript TEXT NOT NULL,
+            summary TEXT DEFAULT '',
+            action_items TEXT DEFAULT ''
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    let clean_title = if title.trim().is_empty() {
+        "Insightful Session".to_string()
+    } else {
+        title
+    };
+
+    conn.execute(
+        "INSERT INTO sessions (title, date, transcript, summary, action_items) VALUES (?1, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'Session started.', 'Session in progress.', '[]')",
+        rusqlite::params![clean_title]
+    ).map_err(|e| e.to_string())?;
+    
+    let id = conn.last_insert_rowid() as i32;
+    Ok(id)
+}
+
+#[tauri::command]
+fn update_session_data(app: tauri::AppHandle, id: i32, title: String, transcript: String, summary: String, action_items: String) -> Result<(), String> {
+    use rusqlite::Connection;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_data.join("fluely.db");
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE sessions SET title = ?1, transcript = ?2, summary = ?3, action_items = ?4 WHERE id = ?5",
+        rusqlite::params![title, transcript, summary, action_items, id]
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn save_session(app: tauri::AppHandle, title: String, transcript: String, summary: String, action_items: String) -> Result<(), String> {
     use rusqlite::Connection;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -277,8 +358,26 @@ fn save_session(app: tauri::AppHandle, title: String, transcript: String, summar
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     
     conn.execute(
-        "INSERT INTO sessions (title, date, transcript, summary, action_items) VALUES (?1, datetime('now'), ?2, ?3, ?4)",
-        rusqlite::params![title, transcript, summary, action_items]
+        "CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            date TEXT NOT NULL,
+            transcript TEXT NOT NULL,
+            summary TEXT DEFAULT '',
+            action_items TEXT DEFAULT ''
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    let clean_title = if title.trim().is_empty() {
+        "Insightful Session".to_string()
+    } else {
+        title
+    };
+
+    conn.execute(
+        "INSERT INTO sessions (title, date, transcript, summary, action_items) VALUES (?1, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), ?2, ?3, ?4)",
+        rusqlite::params![clean_title, transcript, summary, action_items]
     ).map_err(|e| e.to_string())?;
     
     Ok(())
@@ -296,21 +395,35 @@ fn get_sessions(app: tauri::AppHandle) -> Result<Vec<Session>, String> {
 
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT id, title, date, transcript, summary, action_items FROM sessions ORDER BY date DESC").map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            date TEXT NOT NULL,
+            transcript TEXT NOT NULL,
+            summary TEXT DEFAULT '',
+            action_items TEXT DEFAULT ''
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare("SELECT id, title, date, transcript, summary, action_items FROM sessions ORDER BY id DESC").map_err(|e| e.to_string())?;
     let session_iter = stmt.query_map([], |row| {
         Ok(Session {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            date: row.get(2)?,
-            transcript: row.get(3)?,
-            summary: row.get(4).unwrap_or_default(),
-            action_items: row.get(5).unwrap_or_default(),
+            id: row.get::<_, i32>(0).unwrap_or(0),
+            title: row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "Untitled Session".to_string()),
+            date: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "Recently".to_string()),
+            transcript: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            summary: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            action_items: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
         })
     }).map_err(|e| e.to_string())?;
     
     let mut sessions = Vec::new();
     for session in session_iter {
-        sessions.push(session.map_err(|e| e.to_string())?);
+        if let Ok(s) = session {
+            sessions.push(s);
+        }
     }
     
     Ok(sessions)
@@ -457,10 +570,12 @@ fn main() {
                             name TEXT NOT NULL,
                             provider TEXT NOT NULL,
                             key_value TEXT NOT NULL,
+                            base_url TEXT DEFAULT '',
                             is_active INTEGER DEFAULT 0
                         )",
                         [],
                     );
+                    let _ = conn.execute("ALTER TABLE api_keys ADD COLUMN base_url TEXT DEFAULT ''", []);
                 }
             }
 
@@ -478,6 +593,8 @@ fn main() {
             capture_screen, 
             ask_llm, 
             get_audio_devices, 
+            create_session,
+            update_session_data,
             save_session, 
             get_sessions, 
             delete_session,

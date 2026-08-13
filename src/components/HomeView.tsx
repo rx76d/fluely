@@ -14,8 +14,15 @@ interface Session {
   transcript: string;
 }
 
+function safeDate(dStr: string): Date {
+  if (!dStr) return new Date();
+  const isoStr = dStr.includes(' ') && !dStr.includes('T') ? dStr.replace(' ', 'T') : dStr;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
 export function HomeView() {
-  const { setAppState } = useStore();
+  const { setAppState, appState } = useStore();
   const appWindow = getCurrentWindow();
 
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -30,7 +37,7 @@ export function HomeView() {
   const loadSessions = async () => {
     try {
       const data = await invoke<Session[]>('get_sessions');
-      setSessions(data);
+      setSessions(data || []);
     } catch (err) {
       console.error("Failed to load sessions:", err);
     }
@@ -38,15 +45,23 @@ export function HomeView() {
 
   useEffect(() => {
     loadSessions();
-  }, []);
+  }, [appState]);
 
   const handleStartSession = async () => {
     try {
       useStore.getState().resetSession();
+      const now = new Date();
+      const dateStr = now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const title = `Session - ${dateStr} at ${timeStr}`;
+
+      const newId = await invoke<number>('create_session', { title });
+      useStore.getState().setActiveSessionId(newId);
+
       await invoke('set_overlay_mode');
       setAppState('SESSION');
     } catch (e) {
-      console.error("Failed to transition to session mode", e);
+      console.error("Failed to start session:", e);
       setAppState('SESSION');
     }
   };
@@ -77,7 +92,7 @@ export function HomeView() {
   };
 
   const filteredSessions = sessions.filter(s =>
-    s.title.toLowerCase().includes(searchQuery.toLowerCase())
+    (s.title || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -259,11 +274,11 @@ export function HomeView() {
                         <span className="text-gray-900 dark:text-zinc-100 font-semibold text-[14px]">{session.title}</span>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[11px] text-gray-400 dark:text-zinc-500 font-medium">
-                            {new Date(session.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                            {safeDate(session.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                           </span>
                           <span className="w-1 h-1 rounded-full bg-gray-200 dark:bg-white/10"></span>
                           <span className="text-[11px] text-gray-400 dark:text-zinc-500 font-medium">
-                            {new Date(session.date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            {safeDate(session.date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                           </span>
                         </div>
                       </div>

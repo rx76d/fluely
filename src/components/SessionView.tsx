@@ -115,17 +115,19 @@ export function SessionView() {
       setConnectionStatus('verifying');
       try {
         let apiKey = "LOCAL_INFERENCE";
+        let baseUrl: string | null = null;
         const isLocal = provider.toLowerCase().includes('ollama') || provider.toLowerCase().includes('local');
 
         if (!isLocal) {
           try {
-            const active: [string, string] | null = await invoke('db_get_active_key');
+            const active: [string, string, string] | null = await invoke('db_get_active_key');
             if (!active) {
               updateAiResponse(1, `**System:** API Key not found! Please configure it in Settings.`);
               setConnectionStatus('error');
               return;
             }
             apiKey = active[0];
+            baseUrl = active[2];
           } catch (e) {
             updateAiResponse(1, `**System:** Database error. Please check Settings.`);
             setConnectionStatus('error');
@@ -140,7 +142,8 @@ export function SessionView() {
           transcriptContext: "Connection test.",
           apiKey,
           provider,
-          model
+          model,
+          baseUrl
         });
 
         updateAiResponse(1, `**System:** Connection to **${provider}** is successful. Using model **${model}**.`);
@@ -264,12 +267,14 @@ export function SessionView() {
       const transcriptText = currentTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n');
 
       let apiKey = "LOCAL_INFERENCE";
+      let baseUrl: string | null = null;
       const isLocal = provider.toLowerCase().includes('ollama') || provider.toLowerCase().includes('local');
 
       if (!isLocal) {
-        const active: [string, string] | null = await invoke('db_get_active_key');
+        const active: [string, string, string] | null = await invoke('db_get_active_key');
         if (active) {
           apiKey = active[0];
+          baseUrl = active[2];
         } else {
           setIsGeneratingInsights(false);
           return;
@@ -284,7 +289,8 @@ export function SessionView() {
         transcriptContext: transcriptText,
         apiKey,
         provider,
-        model
+        model,
+        baseUrl
       });
 
       const insights = JSON.parse(summaryResponse);
@@ -317,18 +323,20 @@ export function SessionView() {
 
     try {
       let apiKey = "LOCAL_INFERENCE";
+      let baseUrl: string | null = null;
 
       const isLocal = provider.toLowerCase().includes('ollama') || provider.toLowerCase().includes('local');
 
       if (!isLocal) {
         try {
-          const active: [string, string] | null = await invoke('db_get_active_key');
+          const active: [string, string, string] | null = await invoke('db_get_active_key');
           if (!active) {
             addAiResponse(`**System:** API Key not found! Please configure it in Settings.`);
             setIsLoading(false);
             return;
           }
           apiKey = active[0];
+          baseUrl = active[2];
         } catch (e) {
           addAiResponse(`**System:** Database error. Please check Settings.`);
           setIsLoading(false);
@@ -348,7 +356,8 @@ export function SessionView() {
         transcriptContext,
         apiKey,
         provider,
-        model
+        model,
+        baseUrl
       });
 
 
@@ -379,20 +388,34 @@ export function SessionView() {
 
   const handleEndSession = async () => {
     try {
-      const fullTranscriptText = liveTranscript.map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.text}`).join('\n');
-      const title = `Insightful Session on ${new Date().toLocaleDateString()}`;
-      const summary = liveInsights.summary;
-      const actionItems = JSON.stringify(liveInsights.actionItems);
-      await invoke('save_session', { title, transcript: fullTranscriptText, summary, action_items: actionItems });
+      const activeId = useStore.getState().activeSessionId;
+      const now = new Date();
+      const dateStr = now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const title = `Session - ${dateStr} at ${timeStr}`;
+
+      const fullTranscriptText = liveTranscript
+        .map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.text}`)
+        .join('\n');
+      const transcript = fullTranscriptText.trim() || "No live speech recorded during this session.";
+      const summary = liveInsights.summary || "Session completed.";
+      const actionItems = JSON.stringify(liveInsights.actionItems || []);
+
+      if (activeId) {
+        await invoke('update_session_data', { id: activeId, title, transcript, summary, action_items: actionItems });
+      } else {
+        await invoke('save_session', { title, transcript, summary, action_items: actionItems });
+      }
     } catch (err) {
-      console.error("Failed to save session", err);
+      console.error("Failed to save/update session:", err);
     }
 
     try {
       await invoke('set_home_mode');
     } catch (err) {
-      console.error("Failed to restore home window mode", err);
+      console.error("Failed to restore home window mode:", err);
     } finally {
+      useStore.getState().resetSession();
       setAppState('HOME');
     }
   };
@@ -554,120 +577,37 @@ export function SessionView() {
 
             <div className="pt-4">
               <h3 className="text-[11px] font-bold tracking-[2px] uppercase text-zinc-500 mb-4">Live Transcript Feed</h3>
-              <div className="space-y-5 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar pl-1">
-                {liveTranscript.slice(-10).map((t, idx) => (
-                  <div 
-                    key={idx} 
-                    className={`pl-4 border-l-2 relative transition-all duration-300 ${
-                      t.speaker === 'Interviewer' 
-                        ? 'border-red-500/40 hover:border-red-500' 
-                        : 'border-blue-500/40 hover:border-blue-500'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${t.speaker === 'Interviewer' ? 'text-red-400' : 'text-blue-400'}`}>
-                        {t.speaker}
-                      </span>
-                      <span className="text-[9px] text-zinc-500 font-mono">
-                        {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </span>
-                    </div>
-                    <p className="text-[13px] text-zinc-300 leading-relaxed font-medium">{t.text}</p>
+              <div className="space-y-5 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar pl-1">
+                {liveTranscript.length === 0 ? (
+                  <div className="flex items-center gap-3 text-zinc-500 p-4 border border-dashed border-white/5 rounded-2xl animate-pulse">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                    <span className="text-[12px] font-medium tracking-wide">Listening for live audio... Speak or start meeting.</span>
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-white/5">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-[10px] font-bold tracking-[1.5px] uppercase text-zinc-400">
-                    Transcript Simulator
-                  </h4>
-                  <span className="text-[9px] text-zinc-500 font-medium">Test insights and suggested answers</span>
-                </div>
-                
-                <div className="flex gap-2 mb-3">
-                  <input
-                    type="text"
-                    placeholder="Type a simulated message..."
-                    className="flex-1 bg-white/5 border border-white/5 hover:border-white/10 focus:border-blue-500/30 rounded-xl px-4 py-2 text-xs text-white placeholder:text-zinc-500 outline-none transition-all font-medium"
-                    id="simulator-input"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const input = e.currentTarget;
-                        const text = input.value.trim();
-                        if (text) {
-                          useStore.getState().addTranscript({
-                            speaker: 'You',
-                            text,
-                            timestamp: Date.now()
-                          });
-                          input.value = '';
-                        }
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById('simulator-input') as HTMLInputElement;
-                      const text = input?.value.trim();
-                      if (text) {
-                        useStore.getState().addTranscript({
-                          speaker: 'You',
-                          text,
-                          timestamp: Date.now()
-                        });
-                        input.value = '';
-                      }
-                    }}
-                    className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 hover:border-blue-500/50 text-blue-400 text-xs font-bold rounded-xl transition-all"
-                  >
-                    Send You
-                  </button>
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById('simulator-input') as HTMLInputElement;
-                      const text = input?.value.trim();
-                      if (text) {
-                        useStore.getState().addTranscript({
-                          speaker: 'Interviewer',
-                          text,
-                          timestamp: Date.now()
-                        });
-                        input.value = '';
-                      }
-                    }}
-                    className="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 hover:border-red-500/50 text-red-400 text-xs font-bold rounded-xl transition-all"
-                  >
-                    Send Interviewer
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { label: "Tell me about yourself", speaker: "Interviewer", text: "Could you tell me a bit about yourself and your background?" },
-                    { label: "Why do you want this role?", speaker: "Interviewer", text: "What makes you interested in this role and our company?" },
-                    { label: "Your experience with React", speaker: "Interviewer", text: "Can you explain your experience building applications with React?" },
-                    { label: "My background", speaker: "You", text: "I have over 4 years of experience as a software engineer, specializing in full-stack JavaScript applications." },
-                  ].map((item, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        useStore.getState().addTranscript({
-                          speaker: item.speaker,
-                          text: item.text,
-                          timestamp: Date.now()
-                        });
-                      }}
-                      className={`text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-all ${
-                        item.speaker === 'Interviewer'
-                          ? 'bg-red-500/5 hover:bg-red-500/10 border-red-500/10 text-red-400 hover:border-red-500/30'
-                          : 'bg-blue-500/5 hover:bg-blue-500/10 border-blue-500/10 text-blue-400 hover:border-blue-500/30'
+                ) : (
+                  liveTranscript.slice(-15).map((t, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`pl-4 border-l-2 relative transition-all duration-300 ${
+                        t.speaker === 'Interviewer' 
+                          ? 'border-red-500/40 hover:border-red-500' 
+                          : 'border-blue-500/40 hover:border-blue-500'
                       }`}
                     >
-                      + {item.label}
-                    </button>
-                  ))}
-                </div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${t.speaker === 'Interviewer' ? 'text-red-400' : 'text-blue-400'}`}>
+                          {t.speaker}
+                        </span>
+                        <span className="text-[9px] text-zinc-500 font-mono">
+                          {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="text-[13px] text-zinc-300 leading-relaxed font-medium">{t.text}</p>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
