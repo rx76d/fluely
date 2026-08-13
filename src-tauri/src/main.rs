@@ -5,8 +5,10 @@ mod audio;
 use tauri::Manager;
 
 #[cfg(target_os = "macos")]
+#[allow(unused_imports, unexpected_cfgs)]
 use objc::{msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
+#[allow(unused_imports)]
 use cocoa::base::id;
 use serde::{Serialize, Deserialize};
 use std::sync::atomic::{AtomicBool, Ordering};
