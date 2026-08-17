@@ -40,11 +40,8 @@ Open the DMG file and drag Fluely into Applications or extract the App tarball a
 ### Linux
 
 - [fluely-0.1.0-1.x86_64.rpm](https://github.com/rx76d/fluely/releases/download/v0.1.0/fluely-0.1.0-1.x86_64.rpm)  
-  SHA256: `ff7127f80e3601baf8a1779802ea69a95cec3a60388a4cd3feb173c50d6f9462`
 - [fluely_0.1.0_amd64.deb](https://github.com/rx76d/fluely/releases/download/v0.1.0/fluely_0.1.0_amd64.deb)  
-  SHA256: `720e782303aa988addf9064fe09c049226467f65714da336924bf6b9a28fa20c`
 - [fluely_0.1.0_amd64.AppImage](https://github.com/rx76d/fluely/releases/download/v0.1.0/fluely_0.1.0_amd64.AppImage)  
-  SHA256: `27249b3699bae79bc30b99c4555979c603378d62dcd50055b69b764283dfd15d`
 
 Install using your distro package manager for the RPM or DEB package or make the AppImage executable and launch it directly.
 
